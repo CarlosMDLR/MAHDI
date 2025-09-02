@@ -53,10 +53,23 @@ MAHDI/
 
 ---
 
-## 📦 Dependencies
+## 📦 Installation and Dependencies
 
-A `requirements.txt` and installation guide will be provided upon first release.
+## Installation
 
+It is recommended to use a dedicated Python virtual environment to run MAHDI.
+
+## 1. Create a virtual environment
+```bash
+python3 -m venv mahdi_env
+source mahdi_env/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+This project also requires GNU Astronomy Utilities (Gnuastro), which provides
+astnoisechisel, astsegment, astscript-psf-*, and related tools.
+Please install Gnuastro on your system following the instructions from the official documentation.
 ---
 
 ## Usage
