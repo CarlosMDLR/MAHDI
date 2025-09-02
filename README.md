@@ -89,7 +89,7 @@ options:
   --zp ZP               Photometric zero point. Default: 22.5.
 ```
 
-#Example
+# Example
 
 Suppose you have:
 
@@ -113,7 +113,7 @@ python3 mahdi.py \
   --zp 22.5
 ```
 
-#What happens step by step
+# What happens step by step
 
 1. Mask creation
 All input galaxy images are processed with Gnuastro (NoiseChisel + Segment) to create masks that identify sources and background.
@@ -133,7 +133,7 @@ Each selected star is subtracted from the galaxy image using its PSF model.
 
 - Cleaned galaxy images are stored in Process_data/Subtract_stars/Subtrac_copy_*
 
--If --model-scatter is enabled, a combined scattered-light map is also created under Process_data/Subtract_stars/Full_scatter_maps_*.
+- If --model-scatter is enabled, a combined scattered-light map is also created under Process_data/Subtract_stars/Full_scatter_maps_*.
 
 - Star stamps are in Process_data/Subtract_stars/Stamps/
 
