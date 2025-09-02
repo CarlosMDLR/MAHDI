@@ -125,6 +125,9 @@ python3 mahdi.py \
   --px-scale 0.33 \
   --zp 22.5
 ```
+Below is an example of the generated scattered-light map of the field of IC1101 from Marrero-de la Rosa et al. (In Prep):
+
+<img width="4802" height="2193" alt="comparison_scatter_map(2)" src="https://github.com/user-attachments/assets/d5ce9214-dbfb-492d-97fc-eba5fbaa9c78" />
 
 # What happens step by step
 
@@ -178,5 +181,5 @@ This code will be released under the MIT license.
 
 ## 🤝 Acknowledgements
 
-MAHDI is developed as part of a deep imaging pipeline at the Instituto de Astrofísica de Canarias (IAC). The tool relies on Gaia DR3 data and is designed to work in tandem with the PSF modeling code [LISAN]([https://github.com/](https://github.com/CarlosMDLR/LISAN))). If you use MAHDI in your research, please cite the accompanying paper Marrero-de la Rosa et al. (in preparation) and acknowledge this repository.
+MAHDI is developed as part of a deep imaging pipeline at the Instituto de Astrofísica de Canarias (IAC). The tool relies on Gaia DR3 data and is designed to work in tandem with the PSF modeling code [LISAN]([https://github.com/](https://github.com/CarlosMDLR/LISAN))). If you use MAHDI in your research, please cite the accompanying paper Marrero-de la Rosa et al. (In Prep.) and acknowledge this repository.
 
