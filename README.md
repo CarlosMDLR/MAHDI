@@ -34,44 +34,94 @@ This process ensures an adaptive and accurate removal of diffuse stellar contami
 
 MAHDI/
 
-├── mahdi_core.py # Main halo subtraction routine
-
-├── psf_scaling.py # Flux calibration for each star
-
-├── saturation_analysis.py # Rsat computation and annuli definition
-
-├── model_builder.py # Construction of scattered light map
-
-├── config.yaml # Parameters and options
-
-├── data/ # Input images and star catalogues
-
-├── output/ # Cleaned images, models, and residuals
-
-└── notebooks/ # Example use cases and visualization
+├── mahdi.py              # Main entry point, orchestrates the full subtraction pipeline
+├── subtracting_stars.py  # Class-based workflow for star selection and PSF subtraction
+├── utils.py              # Helper functions (I/O, masks, radial profiles, fitting)
+├── data/                 # Input images and star catalogues
+├── Process_data/         # All main data from the process
+│   ├── Mask_data/        # Mask directory, outputs from NoiseChisel and Segment
+│   └── Subtract_stars/   # Data from the star selection and subtraction pipeline
+│       ├── Full_scatter_maps_{filter}/   # Combined scattered-light maps per filter
+│       ├── Normalization_factors/ # Scale factors used for PSF normalization
+│       ├── Norm_radii/            # Radii normalization products for each star
+│       ├── Quit_stars_{filter}/          # FITS tables of selected stars after cleaning
+│       ├── Scatter_field_{filter}/       # Individual scatter-field images for each star
+│       ├── Stamps/                # Cropped FITS stamps centered on selected stars
+│       └── Subtrac_copy_{filter}/        # Working copies of galaxy images during subtraction, FINAL IMAGES WILL BE HERE when the process ends
+└── Trash/                # Temporary files (future versions may allow disabling this)
 
 
 ---
 
 ## 📦 Dependencies
 
-- `astropy`, `numpy`, `scipy`, `pandas`
-- `matplotlib`, `photutils`
-- Optional: `sep`, `gnuastro`, `astropy.visualization`
-
 A `requirements.txt` and installation guide will be provided upon first release.
 
 ---
 
+## Usage
+
+The pipeline is executed from the command line via `mahdi.py`.  
+To see all available options, run:
+
+```bash
+python3 mahdi.py --help
+
+usage: mahdi.py [-h] --dir DIR --dir-psf DIR_PSF --filters FILTERS --mag-inf-sub MAG_INF_SUB --mag-sup-sub MAG_SUP_SUB --min-dist-sub MIN_DIST_SUB [--model-scatter]
+                [--px-scale PX_SCALE] [--zp ZP]
+
+Pipeline: create masks and subtract stars using PSF modeling.
+
+options:
+  -h, --help            show this help message and exit
+  --dir DIR             Directory containing the FITS galaxy cutouts.
+  --dir-psf DIR_PSF     Directory containing the PSF models. The expected format is:
+                        dir_psf/psf_(gal_name)_(filter).fits
+  --filters FILTERS     Comma-separated list of filters, e.g. 'g,r,i'.
+  --mag-inf-sub MAG_INF_SUB
+                        Lower magnitude limit for star selection.
+  --mag-sup-sub MAG_SUP_SUB
+                        Upper magnitude limit for star selection.
+  --min-dist-sub MIN_DIST_SUB
+                        Minimum angular distance (in degrees) between stars.
+  --model-scatter       Enable scattered light field modeling. Default: False.
+  --px-scale PX_SCALE   Pixel scale (arcsec/pixel). Default: 0.33.
+  --zp ZP               Photometric zero point. Default: 22.5.
+```
+
+#Example
+
+Suppose you have:
+
+- Galaxy cutouts in ./Process_data/Data/
+
+- PSF models in ./PSF_files/PSFs_complete/, named as psf_(gal_name)_(filter).fits
+e.g. psf_NGC100_g.fits, psf_NGC100_r.fits
+
+You can run the full pipeline as:
+
+``
+python3 mahdi.py \
+  --dir ./Process_data/Beard_cut \
+  --dir-psf ./PSF_files/PSFs_complete \
+  --filters g,r \
+  --mag-inf-sub 12.5 \
+  --mag-sup-sub 17.8 \
+  --min-dist-sub 0.003 \
+  --model-scatter \
+  --px-scale 0.33 \
+  --zp 22.5
+``
+
 ## 🛠️ Current Status
 
-MAHDI is under initial development. The first public version will include:
+MAHDI is under initial development. The first public version includes:
 
 - Gaia-based star selection with optional parallax/proper motion filters.
 - Rsat vs magnitude fitting using RANSAC.
 - Annulus-based flux scaling and normalization for each star.
 - Iterative, position-aware halo subtraction.
-- Diagnostic outputs: comparison images, profiles, and residual statistics.
+- Diagnostic outputs: comparison images, profiles from the stars and scattered light maps.
 
 ### Planned features
 
