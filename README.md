@@ -100,7 +100,7 @@ e.g. psf_NGC100_g.fits, psf_NGC100_r.fits
 
 You can run the full pipeline as:
 
-``
+```bash
 python3 mahdi.py \
   --dir ./Process_data/Beard_cut \
   --dir-psf ./PSF_files/PSFs_complete \
@@ -111,7 +111,33 @@ python3 mahdi.py \
   --model-scatter \
   --px-scale 0.33 \
   --zp 22.5
-``
+```
+
+#What happens step by step
+
+1. Mask creation
+All input galaxy images are processed with Gnuastro (NoiseChisel + Segment) to create masks that identify sources and background.
+
+2. Star selection
+Stars are selected within the specified magnitude and distance ranges.
+Clean FITS tables are created under Process_data/Subtract_stars/Quit_stars_*.
+
+3. Star normalization
+PSF stamps are cropped, radial profiles are computed, and characteristic radii are measured.
+Normalization factors are stored in Process_data/Subtract_stars/Normalization_factors/.
+
+4. PSF subtraction
+Each selected star is subtracted from the galaxy image using its PSF model.
+
+5. Outputs
+
+- Cleaned galaxy images are stored in Process_data/Subtract_stars/Subtrac_copy_*
+
+-If --model-scatter is enabled, a combined scattered-light map is also created under Process_data/Subtract_stars/Full_scatter_maps_*.
+
+- Star stamps are in Process_data/Subtract_stars/Stamps/
+
+- Scatter-field components are in Process_data/Subtract_stars/Scatter_field_*
 
 ## 🛠️ Current Status
 
