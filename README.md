@@ -33,7 +33,7 @@ This process ensures an adaptive and accurate removal of diffuse stellar contami
 ## 📁 Project Structure (planned)
 
 MAHDI/
-
+```bash
 ├── mahdi.py              # Main entry point, orchestrates the full subtraction pipeline
 ├── subtracting_stars.py  # Class-based workflow for star selection and PSF subtraction
 ├── utils.py              # Helper functions (I/O, masks, radial profiles, fitting)
@@ -49,7 +49,7 @@ MAHDI/
 │       ├── Stamps/                # Cropped FITS stamps centered on selected stars
 │       └── Subtrac_copy_{filter}/        # Working copies of galaxy images during subtraction, FINAL IMAGES WILL BE HERE when the process ends
 └── Trash/                # Temporary files (future versions may allow disabling this)
-
+```
 
 ---
 
