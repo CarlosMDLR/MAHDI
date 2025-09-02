@@ -59,7 +59,8 @@ MAHDI/
 
 It is recommended to use a dedicated Python virtual environment to run MAHDI.
 
-## 1. Create a virtual environment
+# Create a virtual environment
+
 ```bash
 python3 -m venv mahdi_env
 source mahdi_env/bin/activate
