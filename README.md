@@ -94,9 +94,9 @@ options:
                         dir_psf/psf_(gal_name)_(filter).fits
   --filters FILTERS     Comma-separated list of filters, e.g. 'g,r,i'.
   --mag-inf-sub MAG_INF_SUB
-                        Lower magnitude limit for star selection.
+                        Lower magnitude limit for star selection (bright stars).
   --mag-sup-sub MAG_SUP_SUB
-                        Upper magnitude limit for star selection.
+                        Upper magnitude limit for star selection (fainter stars).
   --min-dist-sub MIN_DIST_SUB
                         Minimum angular distance (in degrees) between stars.
   --model-scatter       Enable scattered light field modeling. Default: False.
