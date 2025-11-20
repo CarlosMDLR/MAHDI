@@ -88,7 +88,8 @@ Pipeline: create masks and subtract stars using PSF modeling.
 
 options:
   -h, --help            show this help message and exit
-  --dir DIR             Directory containing the FITS galaxy cutouts.
+  --dir DIR             Directory containing the FITS galaxy cutouts.The expected format is:
+                        dir/(gal_name)_(filter).fits
   --dir-psf DIR_PSF     Directory containing the PSF models. The expected format is:
                         dir_psf/psf_(gal_name)_(filter).fits
   --filters FILTERS     Comma-separated list of filters, e.g. 'g,r,i'.
