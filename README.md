@@ -92,6 +92,8 @@ options:
                         dir/(gal_name)_(filter).fits
   --dir-psf DIR_PSF     Directory containing the PSF models. The expected format is:
                         dir_psf/psf_(gal_name)_(filter).fits
+  --hdu HDU             HDU index for FITS files. Default: 0.
+  --psf-hdu PSF_HDU     HDU index for PSF FITS files. Default: 0.
   --filters FILTERS     Comma-separated list of filters, e.g. 'g,r,i'.
   --mag-inf-sub MAG_INF_SUB
                         Lower magnitude limit for star selection (bright stars).
