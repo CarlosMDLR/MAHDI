@@ -108,7 +108,7 @@ options:
 
 Suppose you have:
 
-- Galaxy cutouts in ./Process_data/Data/
+- Galaxy cutouts in ./Process_data/Data/, named as {gal_name}_{filter}.fits
 
 - PSF models in ./PSF_files/PSFs_complete/, named as psf_(gal_name)_(filter).fits
 e.g. psf_NGC100_g.fits, psf_NGC100_r.fits
