@@ -121,6 +121,7 @@ python3 mahdi.py --dir ./Process_data/Beard_cut --dir-psf ./PSF_files/PSFs_compl
 Below is an example of the subtraction of stars and the generated scattered-light map of the field of IC1101 from Marrero-de la Rosa et al. (In Prep):
 
 <img width="1597" height="799" alt="Screenshot from 2025-09-02 15-55-30" src="https://github.com/user-attachments/assets/e2499c4a-9602-44c5-81d2-6952b396276b" />
+[comparison_scatter_map.pdf](https://github.com/user-attachments/files/23905832/comparison_scatter_map.pdf)
 
 <img width="4802" height="2193" alt="comparison_scatter_map(2)" src="https://github.com/user-attachments/assets/d5ce9214-dbfb-492d-97fc-eba5fbaa9c78" />
 
