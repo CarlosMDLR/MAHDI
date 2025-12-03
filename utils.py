@@ -43,7 +43,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 #
 #=============================================================
 
-def masks_maker_total_image(dir):
+def masks_maker_total_image(dir, hdu):
     """
     Run Gnuastro NoiseChisel and Segment on all FITS images in a directory,
     creating masks for each image and saving them into dedicated subfolders.
@@ -103,7 +103,7 @@ def masks_maker_total_image(dir):
 
         # Run NoiseChisel to detect faint structures
         os.system(
-            f"astnoisechisel {path} --tilesize=20,20 --interpnumngb=5 --dthresh=0.05 "
+            f"astnoisechisel {path} --hdu={str(hdu)} --tilesize=20,20 --interpnumngb=5 --dthresh=0.05 "
             f"--snminarea=2 --rawoutput --quiet --output={output_noisechisel}"
         )
 
@@ -204,10 +204,6 @@ def masks_maker(name, profile):
     np.ndarray
         Binary mask array (1 = object, 0 = signal).
     """
-    # Print a header for visual separation in logs
-    print("\n\n" + "=" * 60)
-    print(f"\n Making inner mask and profile of {name}")
-    print("\n" + "=" * 60)
 
     # Define intermediate output filenames
     output_astarith    = name.replace(".fits", "_astarithmetic.fits")
@@ -267,7 +263,7 @@ def masks_maker(name, profile):
     return objects
  
 
-def prepare_star_selection(filter: str, name: str, dir: str,
+def prepare_star_selection(filter: str, name: str, dir: str, hdu: int,
                            mag_inf_lim: float, mag_sup_lim: float, min_dist: float):
     """
     Prepare working directories, run `astscript-psf-select-stars` to select stars,
@@ -325,6 +321,7 @@ def prepare_star_selection(filter: str, name: str, dir: str,
         [
             "astscript-psf-select-stars",
             str(ruta_completa),
+            f"--hdu={str(hdu)}",
             "--quiet",
             f"--magnituderange={mag_inf_lim},{mag_sup_lim}",
             f"--mindistdeg={min_dist}",
@@ -373,6 +370,7 @@ def prepare_star_selection(filter: str, name: str, dir: str,
 def process_selected_stars(
     ruta_star: Path,
     ruta_gal: Path,
+    hdu: int,
     ruta_out_norm_base: Path,
     norm_dir: Path,
     filter: str,
@@ -409,6 +407,7 @@ def process_selected_stars(
             [
                 "astcrop",
                 str(ruta_gal),
+                f"--hdu={str(hdu)}",
                 "--mode=wcs",
                 f"--center={ra},{dec}",
                 "--widthinpix",
@@ -438,7 +437,7 @@ def process_selected_stars(
     quitar: List[int] = []
     contador = 0
 
-    for file in files_stars:
+    for file in tqdm(files_stars, desc="Making inner mask and profiles of the stars"):
         try:
             path = norm_dir / file
             radial = directorio_radial_profiles / file.replace(".fits", "_radial_profile.fits")
@@ -600,6 +599,7 @@ def fit_ransac_and_build_rings(
     ruta_gal: str,
     ra_stars: np.ndarray,
     dec_stars: np.ndarray,
+    hdu_ind: int,
 ):
     """
     Fit RANSAC regression on (mag, log10(flat_points * px_scale)),
@@ -641,9 +641,9 @@ def fit_ransac_and_build_rings(
     r_min_ring = 1.5 * r_sat_sat / px_scale
     r_max_ring = 4.0 * r_sat_sat / px_scale
 
-    # Get WCS from galaxy FITS (HDU=1) and convert RA/DEC to pixel coords
+    # Get WCS from galaxy FITS (HDU) and convert RA/DEC to pixel coords
     with fits.open(ruta_gal) as hdu:
-        wcs = WCS(hdu[1].header)
+        wcs = WCS(hdu[int(hdu_ind)].header)
 
     coords_sky = SkyCoord(ra=ra_stars, dec=dec_stars, unit="deg", frame="icrs")
     x_stars, y_stars = wcs.world_to_pixel(coords_sky)
@@ -719,9 +719,9 @@ def finalize_sources_and_write_fits(
 
             if index in close_sources:
                 shutil.move(str(source_directory / file_name), str(close_sources_dir / file_name))
-                print(f"Movido: {file_name}")
+                print(f"Rejected: {file_name}")
             else:
-                print(f"Conservado: {file_name}")
+                print(f"Preserved: {file_name}")
 
     # Escribir FITS revisado con tabla actualizada
     hdul = fits.open(ruta_star)

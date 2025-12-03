@@ -22,6 +22,18 @@ def parse_args():
         help="Directory containing the PSF models, the path have to be like: dir_psf /psf_(gal_name)_(filter).fits",
     )
     parser.add_argument(
+        "--hdu",
+        type=int,
+        default=0,
+        help="HDU index for FITS files. Default: 0.",
+    )
+    parser.add_argument(
+        "--psf-hdu",
+        type=int,
+        default=0,
+        help="HDU index for PSF FITS files. Default: 0.",
+    )
+    parser.add_argument(
         "--filters",
         required=True,
         help="Comma-separated list of filters, e.g. 'g,r,i'.",
@@ -68,13 +80,15 @@ def main():
     args = parse_args()
 
     # 1) Create masks for all FITS images in the input directory
-    masks_maker_total_image(args.dir)
+    masks_maker_total_image(args.dir, args.hdu)
 
     # 2) Run star selection
     SubtractingStars(
         filter_list=args.filters.split(","),
         dir=args.dir,
         dir_psf= args.dir_psf,
+        hdu=args.hdu,
+        psf_hdu=args.psf_hdu,
         mag_inf_lim=args.mag_inf_sub,
         mag_sup_lim=args.mag_sup_sub,
         min_dist=args.min_dist_sub,
@@ -88,6 +102,8 @@ def main():
         filter_list=args.filters.split(","),
         dir=args.dir,
         dir_psf= args.dir_psf,
+        hdu=args.hdu,
+        psf_hdu=args.psf_hdu,
         mag_inf_lim=args.mag_inf_sub,
         mag_sup_lim=args.mag_sup_sub,
         min_dist=args.min_dist_sub,

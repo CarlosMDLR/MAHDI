@@ -8,10 +8,10 @@ import re
 import numpy as np
 # Utilities
 import utils as ut
+from astropy.io import fits
 
 
-
-def select_stars(filter: str, name: str, dir: str, mag_inf_lim: float, mag_sup_lim: float, min_dist: float, px_scale: float) -> None:
+def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, mag_sup_lim: float, min_dist: float, px_scale: float) -> None:
     """
     High-level pipeline for selecting stars around a galaxy, building radial profiles,
     fitting normalization rings, and producing a final revised FITS catalog.
@@ -54,13 +54,14 @@ def select_stars(filter: str, name: str, dir: str, mag_inf_lim: float, mag_sup_l
 
     # Step 1: Prepare star-selection environment (directories, output paths)
     ruta_star, ruta_out_norm, ruta_gal, norm_dir, name_2, close_sources_dir = ut.prepare_star_selection(
-        filter, name, dir, mag_inf_lim, mag_sup_lim, min_dist
+        filter, name, dir, hdu, mag_inf_lim, mag_sup_lim, min_dist
     )
     
     # Step 2: Process stars → crop stamps, build masks, measure radial profiles
     radius, counts, ra_stars, dec_stars, mags_stars, quitar = ut.process_selected_stars(
         ruta_star=ruta_star,
         ruta_gal=ruta_gal,
+        hdu=hdu,
         ruta_out_norm_base=ruta_out_norm,
         norm_dir=norm_dir,
         filter=filter,
@@ -68,7 +69,7 @@ def select_stars(filter: str, name: str, dir: str, mag_inf_lim: float, mag_sup_l
         masks_maker=ut.masks_maker,
         extract_number=ut.extract_number,
     )
-
+    
     # Step 3: Find flattening radii for each profile
     flat_points = ut.find_flat_points(radius, counts)
     
@@ -84,7 +85,7 @@ def select_stars(filter: str, name: str, dir: str, mag_inf_lim: float, mag_sup_l
     
     # Step 5: Fit magnitude–radius relation with RANSAC, compute ring sizes
     r_min_ring, r_max_ring, x_positions, y_positions, magnitudes = ut.fit_ransac_and_build_rings(
-        mags_stars, flat_points, px_scale, str(ruta_gal), ra_stars, dec_stars
+        mags_stars, flat_points, px_scale, str(ruta_gal), ra_stars, dec_stars, hdu
     )
     
     # Step 6: Finalize star catalog, move discarded sources, write revised FITS
@@ -106,7 +107,7 @@ def select_stars(filter: str, name: str, dir: str, mag_inf_lim: float, mag_sup_l
     return
 
 
-def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_light, px_scale: float, zp: float):
+def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:int, model_scatter_light, px_scale: float, zp: float):
     """
     Perform PSF-based star subtraction from a galaxy FITS image using Gnuastro tools.
     Optionally also model and subtract the scattered light field.
@@ -147,7 +148,26 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_lig
 
     # Make a working copy of the original image
     os.system(f'cp {path_image} {path_image_copy}')
+    if hdu == 0:
+        with fits.open(path_image_copy) as hdul:
+            
+            # Buscar el HDU que contiene datos reales
+            data_hdu_index = None
+            for i, hdu in enumerate(hdul):
+                if hdu.data is not None:
+                    data_hdu_index = i
+                    break
 
+            if data_hdu_index is None:
+                raise ValueError("Error: Not found any HDU with data in the FITS file.")
+
+
+            data   = hdul[data_hdu_index].data
+            header = hdul[data_hdu_index].header
+        primary_hdu = fits.PrimaryHDU()
+        image_hdu = fits.ImageHDU(data=data, header=header)
+        hdul_new = fits.HDUList([primary_hdu, image_hdu])
+        hdul_new.writeto(path_image_copy, overwrite=True)
     # Path to the table with selected/revised stars
     path_stars = os.path.join(dir_quit_stars, name.replace('.fits', '_quit_revised.fits'))
 
@@ -169,8 +189,9 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_lig
                 {center};{norm_factor};\
                 scale=$(astscript-psf-scale-factor {path_image_copy} \
                     --mode=wcs --quiet\
+                    --hdu=1 \
                     --psf={path_to_psf} \
-                    --psfhdu=0 \
+                    --psfhdu={str(psf_hdu)} \
                     --quiet \
                     --center=$ra,$dec \
                     --tmpdir=./Trash \
@@ -184,8 +205,9 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_lig
                 astscript-psf-subtract {path_image_copy} \
                     --mode=wcs \
                     --quiet \
+                    --hdu=1 \
                     --psf={path_to_psf} \
-                    --psfhdu=0\
+                    --psfhdu={str(psf_hdu)} \
                     --scale=$scale_reduce \
                     --center=$ra,$dec \
                     --modelonly \
@@ -193,8 +215,9 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_lig
                 astscript-psf-subtract {path_image_copy} \
                     --mode=wcs \
                     --quiet \
+                    --hdu=1 \
                     --psf={path_to_psf} \
-                    --psfhdu=0\
+                    --psfhdu={str(psf_hdu)} \
                     --scale=$scale_reduce \
                     --center=$ra,$dec \
                     --output={path_temp};\
@@ -232,8 +255,9 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_lig
                 {center};{norm_factor};\
                 scale=$(astscript-psf-scale-factor {path_image_copy} \
                     --mode=wcs --quiet\
+                    --hdu=1 \
                     --psf={path_to_psf} \
-                    --psfhdu=0 \
+                    --psfhdu={str(psf_hdu)} \
                     --quiet \
                     --center=$ra,$dec \
                     --tmpdir=./Trash \
@@ -247,8 +271,9 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_lig
                 astscript-psf-subtract {path_image_copy} \
                     --mode=wcs \
                     --quiet \
+                    --hdu=1 \
                     --psf={path_to_psf} \
-                    --psfhdu=0\
+                    --psfhdu={str(psf_hdu)} \
                     --scale=$scale_reduce \
                     --center=$ra,$dec \
                     --output={path_temp};\
@@ -259,10 +284,12 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, model_scatter_lig
 
 
 class SubtractingStars:
-    def __init__(self, filter_list,dir, dir_psf, mag_inf_lim, mag_sup_lim, min_dist,model_scatter, px_scale=0.33, zp=22.5):
+    def __init__(self, filter_list,dir, dir_psf, hdu, psf_hdu, mag_inf_lim, mag_sup_lim, min_dist,model_scatter, px_scale=0.33, zp=22.5):
         self.filter_list = filter_list
         self.dir = dir
         self.dir_psf = dir_psf
+        self.hdu = hdu
+        self.psf_hdu = psf_hdu
         self.mag_inf_lim = mag_inf_lim
         self.mag_sup_lim = mag_sup_lim
         self.model_scatter = model_scatter
@@ -276,7 +303,7 @@ class SubtractingStars:
             fits_files = np.sort(fits_files)
             for name in fits_files:
                 try:
-                    select_stars(filter, name, self.dir, self.mag_inf_lim, self.mag_sup_lim, self.min_dist, self.px_scale)
+                    select_stars(filter, name, self.dir, self.hdu, self.mag_inf_lim, self.mag_sup_lim, self.min_dist, self.px_scale)
                 except Exception as e:
                     print("\n ############################################")
                     print(f"\n Failure in galaxy {name} {filter}: {e}")
@@ -289,7 +316,7 @@ class SubtractingStars:
             fits_files = np.sort(fits_files)
             for name in fits_files:
                 try:    
-                    subtractor(filter, name, self.dir, self.dir_psf, self.model_scatter, self.px_scale, self.zp)
+                    subtractor(filter, name, self.dir, self.dir_psf, self.hdu, self.psf_hdu, self.model_scatter, self.px_scale, self.zp)
                 except Exception as e:
                     print("\n ############################################")
                     print(f"\n Failure in galaxy {name} {filter}: {e}")
