@@ -118,13 +118,10 @@ You can run the full pipeline as:
 ```bash
 python3 mahdi.py --dir ./Process_data/Beard_cut --dir-psf ./PSF_files/PSFs_complete --filters g,r --mag-inf-sub 12.5 --mag-sup-sub 17.8 --min-dist-sub 0.003 --model-scatter --px-scale 0.33 --zp 22.5
 ```
-Below is an example of the subtraction of stars and the generated scattered-light map of the field of IC1101 from Marrero-de la Rosa et al. (In Prep):
+Below is an example of the subtraction of stars and the generated scattered-light map of the field of NGC2543 from Marrero-de la Rosa et al. (2025, accepted):
 
-<img width="1597" height="799" alt="Screenshot from 2025-09-02 15-55-30" src="https://github.com/user-attachments/assets/e2499c4a-9602-44c5-81d2-6952b396276b" />
 <img width="1597" height="799" alt="Screenshot from 2025-09-02 15-55-30" src="https://github.com/user-attachments/assets/b0b36d21-40c2-400f-8035-97f0a3661437" />
 
-
-<img width="4802" height="2193" alt="comparison_scatter_map(2)" src="https://github.com/user-attachments/assets/d5ce9214-dbfb-492d-97fc-eba5fbaa9c78" />
 
 # What happens step by step
 
