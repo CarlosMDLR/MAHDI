@@ -5,7 +5,7 @@
 import argparse
 from utils import masks_maker_total_image
 from subtracting_stars import SubtractingStars
-
+from typing import Tuple
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -68,19 +68,53 @@ def parse_args():
         help="Pixel scale (arcsec/pixel). Default: 0.33.",
     )
     parser.add_argument(
+        "--crop-size-pix", 
+        type=Tuple[int,int], 
+        default=(500,500), 
+        help="Crop size around stars (pixels). Default: 500."
+        )
+    parser.add_argument(
         "--zp",
         type=float,
         default=22.5,
         help="Photometric zero point. Default: 22.5.",
+    )
+    parser.add_argument(
+        "--noisechisel-params-full-image",
+        type=str,
+        default=None,
+        help="Extra parameters for astnoisechisel for the full image of the galaxy, e.g. '--tilesize=30,30 --snminarea=3'."
+    )
+    parser.add_argument(
+        "--segment-params-full-image",
+        type=str,
+        default=None,
+        help="Extra parameters for astsegment for the full image of the galaxy, e.g. '--gthresh=-5 --minnumfalse=2'."
+    )
+    parser.add_argument(
+        "--noisechisel-params",
+        type=str,
+        default=None,
+        help="Extra parameters for astnoisechisel for the crops of the stars, e.g. '--tilesize=30,30 --snminarea=3'."
+    )
+    parser.add_argument(
+        "--segment-params",
+        type=str,
+        default=None,
+        help="Extra parameters for astsegment for the crops of the stars, e.g. '--gthresh=-5 --minnumfalse=2'."
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-
+    
     # 1) Create masks for all FITS images in the input directory
-    masks_maker_total_image(args.dir, args.hdu)
+    masks_maker_total_image(args.dir, 
+                            args.hdu,
+                            noisechisel_params=args.noisechisel_params_full_image,
+                            segment_params=args.segment_params_full_image,
+                            )
 
     # 2) Run star selection
     SubtractingStars(
@@ -94,7 +128,10 @@ def main():
         min_dist=args.min_dist_sub,
         model_scatter=args.model_scatter,
         px_scale=args.px_scale,
+        crop_size_pix=args.crop_size_pix,
         zp=args.zp,
+        noisechisel_params=args.noisechisel_params,
+        segment_params=args.segment_params,
     ).selector()
 
     # 3) Run star subtraction
@@ -109,7 +146,10 @@ def main():
         min_dist=args.min_dist_sub,
         model_scatter=args.model_scatter,
         px_scale=args.px_scale,
+        crop_size_pix=args.crop_size_pix,
         zp=args.zp,
+        noisechisel_params=args.noisechisel_params,
+        segment_params=args.segment_params,
     ).subtractor()
 
 

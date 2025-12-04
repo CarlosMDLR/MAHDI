@@ -43,7 +43,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 #
 #=============================================================
 
-def masks_maker_total_image(dir, hdu):
+def masks_maker_total_image(dir, hdu, noisechisel_params=None, segment_params=None):
     """
     Run Gnuastro NoiseChisel and Segment on all FITS images in a directory,
     creating masks for each image and saving them into dedicated subfolders.
@@ -96,22 +96,22 @@ def masks_maker_total_image(dir, hdu):
         print("\n" + "=" * 60)
 
         path = os.path.join(dir, name)
-
-        # Define output paths
         output_noisechisel = os.path.join(dir_noisechisel, name.replace(".fits", "_noisechisel.fits"))
-        output_segment     = os.path.join(dir_segment, name.replace(".fits", "_segment.fits"))
+        output_segment = os.path.join(dir_segment, name.replace(".fits", "_segment.fits"))
+        
+        # Default parameters if none provided
+        if noisechisel_params is None:
+            noisechisel_params = "--tilesize=20,20 --interpnumngb=5 --dthresh=0.05 --snminarea=2 --rawoutput"
+        if segment_params is None:
+            segment_params = "--tilesize=10,10 --interpnumngb=1 --gthresh=-10 --objbordersn=0 --minnumfalse=1"
 
-        # Run NoiseChisel to detect faint structures
-        os.system(
-            f"astnoisechisel {path} --hdu={str(hdu)} --tilesize=20,20 --interpnumngb=5 --dthresh=0.05 "
-            f"--snminarea=2 --rawoutput --quiet --output={output_noisechisel}"
-        )
+        # Run astnoisechisel
+        cmd_noisechisel = f"astnoisechisel {path} --hdu={str(hdu)} {noisechisel_params} --quiet --output={output_noisechisel}"
+        os.system(cmd_noisechisel)
 
-        # Run Segment to create labeled object masks
-        os.system(
-            f"astsegment {output_noisechisel} --tilesize=10,10 --interpnumngb=1 "
-            f"--gthresh=-10 --objbordersn=0 --quiet --minnumfalse=1 --output={output_segment}"
-        )
+        # Run astsegment
+        cmd_segment = f"astsegment {output_noisechisel} {segment_params} --quiet --output={output_segment}"
+        os.system(cmd_segment)
 
     return
 
@@ -187,7 +187,25 @@ def extract_number(filename):
     return int(match.group(1)) if match and match.group(1) else 0
 
 
-def masks_maker(name, profile):
+def create_blank_mask(image_path, mask_path, profile_path):
+    """
+    Create an all-zero mask and masked image (no pixels removed).
+    """
+    print("⚠️ Creating blank mask (no masking applied).")
+
+    imagen = fits.getdata(image_path)
+    blank_mask = np.zeros_like(imagen)
+
+    fits.PrimaryHDU(blank_mask).writeto(mask_path, overwrite=True)
+    fits.PrimaryHDU(imagen).writeto(image_path, overwrite=True)
+
+    # Save dummy radial profile file
+    with open(profile_path.replace(".fits", "_warning.txt"), "w") as f:
+        f.write("NoiseChisel/Segment failed: blank mask used.\n")
+
+    print(f"✅ Blank mask saved: {mask_path}")
+
+def masks_maker(name, profile, noisechisel_params=None, segment_params=None):
     """
     Generate a binary mask from a FITS image using Gnuastro tools (NoiseChisel, Segment),
     apply the mask to the original image, and compute a radial profile.
@@ -210,6 +228,12 @@ def masks_maker(name, profile):
     output_noisechisel = name.replace(".fits", "_noisechisel.fits")
     output_segment     = name.replace(".fits", "_segment.fits")
 
+    # --- Default parameters if not provided
+    if noisechisel_params is None:
+        noisechisel_params = "--tilesize=10,10 --outliernumngb=5 --interpnumngb=1 --qthresh=0.5 --minnumfalse=1"
+    if segment_params is None:
+        segment_params = "--tilesize=10,10 --interpnumngb=1 --gthresh=-10 --objbordersn=0 --minnumfalse=1"
+
     # Step 1: Preprocess image with `astarithmetic` (set zeros to NaN)
     os.system(
         f"astarithmetic {name} {name} --quiet --output={output_astarith} 0.0 eq nan where -g1"
@@ -217,14 +241,14 @@ def masks_maker(name, profile):
 
     # Step 2: Run NoiseChisel to detect low-surface-brightness features
     os.system(
-        f"astnoisechisel {output_astarith} --tilesize=10,10 --quiet --interpnumngb=1 "
-        f"--qthresh=0.5 --minnumfalse=1 --rawoutput --output={output_noisechisel}"
+        f"astnoisechisel {output_astarith} {noisechisel_params} "
+        f"--quiet --output={output_noisechisel}"
     )
 
     # Step 3: Segment the detections with `astsegment`
     os.system(
-        f"astsegment {output_noisechisel} --tilesize=10,10 --interpnumngb=1 --quiet "
-        f"--gthresh=-10 --objbordersn=0 --minnumfalse=1 --output={output_segment}"
+        f"astsegment {output_noisechisel} {segment_params} "
+        f"--quiet --output={output_segment}"
     )
 
     # Step 4: Load segmentation map (HDU 3 usually contains object labels)
@@ -377,7 +401,9 @@ def process_selected_stars(
     name_2: str,
     masks_maker,           # function: (path: str|Path, radial_out: str|Path) -> np.ndarray (or None)
     extract_number,        # function: (filename: str) -> int
-    crop_size_pix: Tuple[int, int] = (1000, 1000),
+    crop_size_pix: Tuple[int, int] = (500, 500),
+    noisechisel_params: str = None,
+    segment_params: str = None
 ) -> Tuple[List[List[float]], List[List[float]], np.ndarray, np.ndarray, np.ndarray, List[int]]:
     """
     Create per-star crops with astcrop, build masks and radial profiles (masks_maker),
@@ -443,7 +469,7 @@ def process_selected_stars(
             radial = directorio_radial_profiles / file.replace(".fits", "_radial_profile.fits")
 
             # Build mask and radial profile
-            masks_maker(str(path), str(radial))
+            masks_maker(str(path), str(radial), noisechisel_params, segment_params)
 
             # Read radial profile: assume HDU=1 with 2 cols (radius, counts)
             with fits.open(radial) as hdul:
