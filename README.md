@@ -103,7 +103,17 @@ options:
                         Minimum angular distance (in degrees) between stars.
   --model-scatter       Enable scattered light field modeling. Default: False.
   --px-scale PX_SCALE   Pixel scale (arcsec/pixel). Default: 0.33.
+  --crop-size-pix CROP_SIZE_PIX
+                        Crop size around stars (pixels). Default: 500.
   --zp ZP               Photometric zero point. Default: 22.5.
+  --noisechisel-params-full-image NOISECHISEL_PARAMS_FULL_IMAGE
+                        Extra parameters for astnoisechisel for the full image of the galaxy, e.g. '--tilesize=30,30 --snminarea=3'.
+  --segment-params-full-image SEGMENT_PARAMS_FULL_IMAGE
+                        Extra parameters for astsegment for the full image of the galaxy, e.g. '--gthresh=-5 --minnumfalse=2'.
+  --noisechisel-params NOISECHISEL_PARAMS
+                        Extra parameters for astnoisechisel for the crops of the stars, e.g. '--tilesize=30,30 --snminarea=3'.
+  --segment-params SEGMENT_PARAMS
+                        Extra parameters for astsegment for the crops of the stars, e.g. '--gthresh=-5 --minnumfalse=2'.
 ```
 
 # Example
@@ -118,7 +128,7 @@ e.g. psf_NGC100_g.fits, psf_NGC100_r.fits
 You can run the full pipeline as:
 
 ```bash
-python3 mahdi.py --dir ./Process_data/Beard_cut --dir-psf ./PSF_files/PSFs_complete --filters g,r --mag-inf-sub 12.5 --mag-sup-sub 17.8 --min-dist-sub 0.003 --model-scatter --px-scale 0.33 --zp 22.5
+python3 mahdi.py --dir ./Process_data/Beard_cut --dir-psf ./PSF_files/PSFs_complete --hdu=1 --psf-hdu=1 --filters=g,r --mag-inf-sub=12.5 --mag-sup-sub=12.9 --min-dist-sub=0.003 --model-scatter --px-scale=0.33 --zp=22.5 --noisechisel-params-full-image="--tilesize=30,30" --noisechisel-params="--tilesize=30,30"
 ```
 Below is an example of the subtraction of stars and the generated scattered-light map of the field of NGC2543 from Marrero-de la Rosa et al. (2025, accepted):
 
