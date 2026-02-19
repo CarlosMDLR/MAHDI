@@ -16,6 +16,7 @@ import pandas as pd
 from pathlib import Path
 from scipy import stats
 from scipy.optimize import curve_fit
+from scipy.interpolate import RegularGridInterpolator
 
 # Visualization
 import matplotlib.pyplot as plt
@@ -618,6 +619,26 @@ def filter_and_clip_stars(
 
     return mags_stars, ra_stars, dec_stars, flat_points, preserve_index
 
+def loadTableForGettingMaskRadius(filename):
+    mag_grid = None
+    sb_grid = None
+
+    with open(filename) as f:
+        lines = f.readlines()
+
+    for i, line in enumerate(lines):
+        if "# mag_grid" in line:
+            mag_grid = np.array(list(map(float, lines[i+1][2:].split())))
+        
+        elif "# sb_grid" in line:
+            sb_grid = np.array(list(map(float, lines[i+1][2:].split())))
+            
+        if mag_grid is not None and sb_grid is not None:
+            break
+
+    grid = np.loadtxt(filename)
+    return grid, mag_grid, sb_grid
+
 def fit_ransac_and_build_rings(
     mags_stars: np.ndarray,
     flat_points: np.ndarray,
@@ -664,8 +685,20 @@ def fit_ransac_and_build_rings(
     r_sat_sat = 10 ** (slope * mags_stars + intercept)
 
     # Define inner/outer radii of rings (in pixels)
-    r_min_ring = 1.5 * r_sat_sat / px_scale
-    r_max_ring = 4.0 * r_sat_sat / px_scale
+    # r_min_ring = 1.5 * r_sat_sat / px_scale
+    # r_max_ring = 4.0 * r_sat_sat / px_scale
+
+    # Define and read the table with the relation between surface brightness and radius for the used psf
+    magnitudeSbRadiusTableFile="/home/sguerra/astro/dwarfAnalysis/src/maskingImages/maskStarsUsingGaia/magnitudeSbRadiusToMask_fornax.dat"
+    grid, mag_grid, sb_grid = loadTableForGettingMaskRadius(magnitudeSbRadiusTableFile)
+    calculateMaskRadius = RegularGridInterpolator((mag_grid, sb_grid), grid, bounds_error=False, fill_value=np.nan)
+
+    innerSurfaceBrightnessForMatching = 21
+    outerSurfaceBrightnessForMatching = 24
+    pts_bright = np.column_stack((mags_stars, np.full_like(mags_stars, innerSurfaceBrightnessForMatching)))
+    pts_faint = np.column_stack((mags_stars, np.full_like(mags_stars, outerSurfaceBrightnessForMatching)))
+    r_min_ring = calculateMaskRadius(pts_bright)
+    r_max_ring = calculateMaskRadius(pts_faint)
 
     # Get WCS from galaxy FITS (HDU) and convert RA/DEC to pixel coords
     with fits.open(ruta_gal) as hdu:
