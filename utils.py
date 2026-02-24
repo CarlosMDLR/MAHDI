@@ -16,7 +16,7 @@ import pandas as pd
 from pathlib import Path
 from scipy import stats
 from scipy.optimize import curve_fit
-from scipy.interpolate import RegularGridInterpolator
+from astropy.table import Table
 
 # Visualization
 import matplotlib.pyplot as plt
@@ -27,6 +27,8 @@ from astropy.io import fits
 from astropy.stats import sigma_clip, sigma_clipped_stats
 from astropy.wcs import WCS
 import astropy.visualization as vis
+from scipy.interpolate import RegularGridInterpolator
+import astropy.units as u
 
 # Machine learning
 from sklearn.linear_model import LinearRegression, RANSACRegressor
@@ -107,11 +109,11 @@ def masks_maker_total_image(dir, hdu, noisechisel_params=None, segment_params=No
             segment_params = "--tilesize=10,10 --interpnumngb=1 --gthresh=-10 --objbordersn=0 --minnumfalse=1"
 
         # Run astnoisechisel
-        cmd_noisechisel = f"astnoisechisel {path} --hdu={str(hdu)} {noisechisel_params} --quiet --output={output_noisechisel}"
+        cmd_noisechisel = f"astnoisechisel {path} --hdu={str(hdu)} {noisechisel_params} --quiet --output={output_noisechisel} 2>/dev/null"
         os.system(cmd_noisechisel)
 
         # Run astsegment
-        cmd_segment = f"astsegment {output_noisechisel} {segment_params} --quiet --output={output_segment}"
+        cmd_segment = f"astsegment {output_noisechisel} {segment_params} --quiet --output={output_segment} 2>/dev/null"
         os.system(cmd_segment)
 
     return
@@ -141,7 +143,7 @@ def fits_to_dataframe(fits_path):
     return pd.DataFrame(data)
 
 
-def dataframe_to_fits(df, fits_path):
+def dataframe_to_fits(df, fits_path, hdu_index=0):
     """
     Save a pandas DataFrame as a FITS file.
 
@@ -158,9 +160,20 @@ def dataframe_to_fits(df, fits_path):
     - This creates a valid but minimal FITS file: column names, types, and units are not preserved.
       For richer metadata, consider using `astropy.io.fits.BinTableHDU.from_columns`.
     """
-    hdu = fits.PrimaryHDU(df.to_numpy())
-    hdul = fits.HDUList([hdu])
+    data = df.to_numpy()
+    
+    if hdu_index == 0:
+        # Standard behavior: Data is in the primary slot
+        hdu = fits.PrimaryHDU(data)
+        hdul = fits.HDUList([hdu])
+    else:
+        # Create an empty PrimaryHDU and put data in an ImageHDU extension
+        primary_hdu = fits.PrimaryHDU() 
+        extension_hdu = fits.ImageHDU(data)
+        hdul = fits.HDUList([primary_hdu, extension_hdu])
+        
     hdul.writeto(fits_path, overwrite=True)
+
 
 
 def extract_number(filename):
@@ -237,19 +250,19 @@ def masks_maker(name, profile, noisechisel_params=None, segment_params=None):
 
     # Step 1: Preprocess image with `astarithmetic` (set zeros to NaN)
     os.system(
-        f"astarithmetic {name} {name} --quiet --output={output_astarith} 0.0 eq nan where -g1"
+        f"astarithmetic {name} {name} --quiet --output={output_astarith} 0.0 eq nan where -g1 2>/dev/null"
     )
 
     # Step 2: Run NoiseChisel to detect low-surface-brightness features
     os.system(
         f"astnoisechisel {output_astarith} {noisechisel_params} "
-        f"--quiet --output={output_noisechisel}"
+        f"--quiet --output={output_noisechisel} 2>/dev/null"
     )
 
     # Step 3: Segment the detections with `astsegment`
     os.system(
         f"astsegment {output_noisechisel} {segment_params} "
-        f"--quiet --output={output_segment}"
+        f"--quiet --output={output_segment} 2>/dev/null"
     )
 
     # Step 4: Load segmentation map (HDU 3 usually contains object labels)
@@ -262,7 +275,6 @@ def masks_maker(name, profile, noisechisel_params=None, segment_params=None):
         axis=None,
         nan_policy="omit",
     ).mode
-
     # Convert segmentation to binary mask
     objects[objects == number] = 0
     objects[objects != 0] = 1
@@ -443,6 +455,7 @@ def process_selected_stars(
                 f"--output={out_stamp}",
             ],
             check=True,
+            stderr=subprocess.DEVNULL,
         )
 
     # Gather generated stamps and sort by the trailing number
@@ -685,7 +698,7 @@ def fit_ransac_and_build_rings(
     r_sat_sat = 10 ** (slope * mags_stars + intercept)
 
     # Define inner/outer radii of rings (in pixels)
-    # r_min_ring = 1.5 * r_sat_sat / px_scale
+    # r_min_ring = 2.0 * r_sat_sat / px_scale
     # r_max_ring = 4.0 * r_sat_sat / px_scale
 
     # Define and read the table with the relation between surface brightness and radius for the used psf
@@ -693,21 +706,30 @@ def fit_ransac_and_build_rings(
     grid, mag_grid, sb_grid = loadTableForGettingMaskRadius(magnitudeSbRadiusTableFile)
     calculateMaskRadius = RegularGridInterpolator((mag_grid, sb_grid), grid, bounds_error=False, fill_value=np.nan)
 
-    innerSurfaceBrightnessForMatching = 21
-    outerSurfaceBrightnessForMatching = 24
+    innerSurfaceBrightnessForMatching = 20.5
+    outerSurfaceBrightnessForMatching = 23
     pts_bright = np.column_stack((mags_stars, np.full_like(mags_stars, innerSurfaceBrightnessForMatching)))
     pts_faint = np.column_stack((mags_stars, np.full_like(mags_stars, outerSurfaceBrightnessForMatching)))
     r_min_ring = calculateMaskRadius(pts_bright)
     r_max_ring = calculateMaskRadius(pts_faint)
+
 
     # Get WCS from galaxy FITS (HDU) and convert RA/DEC to pixel coords
     with fits.open(ruta_gal) as hdu:
         wcs = WCS(hdu[int(hdu_ind)].header)
 
     coords_sky = SkyCoord(ra=ra_stars, dec=dec_stars, unit="deg", frame="icrs")
+
+
     x_stars, y_stars = wcs.world_to_pixel(coords_sky)
 
     return (r_min_ring, r_max_ring, x_stars, y_stars, mags_stars)
+
+
+
+
+
+
 
 def finalize_sources_and_write_fits(
     x_positions: np.ndarray,

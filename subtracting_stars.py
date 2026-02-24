@@ -6,6 +6,8 @@
 import os
 import re
 import numpy as np
+import pandas as pd
+
 # Utilities
 import utils as ut
 from astropy.io import fits
@@ -110,7 +112,7 @@ def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, 
     return
 
 
-def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:int, model_scatter_light, px_scale: float, zp: float):
+def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:int, model_scatter_light, save_individual_scatter, px_scale: float, zp: float):
     """
     Perform PSF-based star subtraction from a galaxy FITS image using Gnuastro tools.
     Optionally also model and subtract the scattered light field.
@@ -138,7 +140,7 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
     - If `model_scatter_light=True`, also generates a combined scatter field map
       and its surface brightness equivalent.
     """
-
+    
     # Print log header
     print("\n\n" + "=" * 60)
     print(f"\n Subtracting stars from {name}")
@@ -185,61 +187,80 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
     temp_file = normalization_dir + f"/{name_2}_{filter}_normalization_factors.txt"
 
     if model_scatter_light:
+        # Directory for storing full scatter maps 
+        directorio_full_scatter = f"./Process_data/Subtract_stars/Full_scatter_maps_{filter}/{name_2}_{filter}"
+        if not os.path.isdir(directorio_full_scatter):
+            os.makedirs(directorio_full_scatter)
+
+        with fits.open(path_image_copy) as hdul:
+            shape = hdul[1].shape
+
+        # Initialisation of scatter map in ADUs
+        ruta_full_scatter    = f"{directorio_full_scatter}/{name_2}_{filter}_full_scatter_field_{filter}.fits"
+        ruta_full_scatterTmp = f"{directorio_full_scatter}/{name_2}_{filter}_full_scatter_field_{filter}_tmp.fits"
+        df1 = pd.DataFrame(np.zeros(shape))
+        ut.dataframe_to_fits(df1, ruta_full_scatter, hdu_index=1)
+        os.system(f"cp {ruta_full_scatter} {ruta_full_scatterTmp}")
+
         # Loop over stars, compute PSF scale factor, subtract both model-only scatter image
         # and the full PSF from the galaxy image, accumulating results in a scatter map
-        os.system(f"asttable {path_stars} -cra,dec,rmin_norm,rmax_norm,image_index --sort phot_g_mean_mag \
-            | while read -r ra dec rmin_norm rmax_norm image_index phot_g_mean_mag; do\
-                {center};{norm_factor};\
+        os.system(f"""
+            asttable {path_stars} -cra,dec,rmin_norm,rmax_norm,image_index --sort phot_g_mean_mag | \\
+            while read -r ra dec rmin_norm rmax_norm image_index phot_g_mean_mag; do
+                echo "Subtracting star $ra $dec"; 
+                currentScatterMap="./Process_data/Mask_data/Mask_segment/{name_2}-{filter}-scatter-img-$image_index-$ra-$dec.fits";
+                {center};{norm_factor};
                 scale=$(astscript-psf-scale-factor {path_image_copy} \
                     --mode=wcs --quiet\
                     --hdu=1 \
-                    --psf={path_to_psf} \
-                    --psfhdu={str(psf_hdu)} \
-                    --quiet \
+                    --psf={path_to_psf}  \
+                    --psfhdu={str(psf_hdu)}  \
+                    --quiet  \
                     --center=$ra,$dec \
-                    --tmpdir=./Trash \
-                    --keeptmp \
-                    --nocentering \
+                    --tmpdir=./Trash  \
+                    --keeptmp  \
+                    --nocentering  \
                     --sigmaclip=2,0.2 \
                     --normradii=$normi \
-                    --segment={path_complete});\
-                scale_reduce=$(astarithmetic $scale 1 x --quiet);\
-                echo \"$image_index $scale_reduce $rmin_norm $rmax_norm $phot_g_mean_mag\" >> {temp_file};\
-                astscript-psf-subtract {path_image_copy} \
-                    --mode=wcs \
-                    --quiet \
+                    --segment={path_complete});
+                scale_reduce=$(astarithmetic $scale 1 x --quiet);
+                echo \"$image_index $scale_reduce $rmin_norm $rmax_norm $phot_g_mean_mag\" >> {temp_file};
+                astscript-psf-subtract {path_image_copy}  \
+                    --mode=wcs  \
+                    --quiet  \
                     --hdu=1 \
                     --psf={path_to_psf} \
                     --psfhdu={str(psf_hdu)} \
                     --scale=$scale_reduce \
                     --center=$ra,$dec \
                     --modelonly \
-                    --output=./Process_data/Mask_data/Mask_segment/{name_2}-{filter}-scatter-img-$image_index-$ra-$dec.fits;\
-                astscript-psf-subtract {path_image_copy} \
+                    --output=$currentScatterMap;
+                astscript-psf-subtract {path_image_copy}  \
                     --mode=wcs \
-                    --quiet \
-                    --hdu=1 \
-                    --psf={path_to_psf} \
-                    --psfhdu={str(psf_hdu)} \
-                    --scale=$scale_reduce \
-                    --center=$ra,$dec \
-                    --output={path_temp};\
-                mv {path_temp} {path_image_copy};\
-                mv ./Process_data/Mask_data/Mask_segment/{name_2}-{filter}-scatter-img-$image_index-$ra-$dec.fits {direct_copy_model};\
-            done")
+                    --quiet  \
+                    --hdu=1  \
+                    --psf={path_to_psf}  \
+                    --psfhdu={str(psf_hdu)}  \
+                    --scale=$scale_reduce  \
+                    --center=$ra,$dec  \
+                    --output={path_temp};
 
-        # Directory for storing full scatter maps
-        directorio_full_scatter = f"./Process_data/Subtract_stars/Full_scatter_maps_{filter}/{name_2}_{filter}"
-        if not os.path.isdir(directorio_full_scatter):
-            os.makedirs(directorio_full_scatter)
+                mv {path_temp} {path_image_copy};
 
-        # Paths for combined scatter map and surface-brightness version
-        ruta_full_scatter   = f"{directorio_full_scatter}/{name_2}_{filter}_full_scatter_field_{filter}.fits"
+                # Acummulate full scatter map
+                astarithmetic $currentScatterMap {ruta_full_scatter} + -g1 --output {ruta_full_scatterTmp};
+                mv {ruta_full_scatterTmp} {ruta_full_scatter} ;
+                
+                # Keep or remove the individual scatter map
+                if [ "{str(save_individual_scatter).lower()}" = "true" ]; then 
+                    mv $currentScatterMap {direct_copy_model};
+                else
+                    rm $currentScatterMap;
+                fi
+            done""")
+
+        # Path for scatter map in Surface Brightness
         ruta_full_scatter_sb= f"{directorio_full_scatter}/{name_2}_{filter}_full_scatter_field_{filter}_sb.fits"
-        
-        # Combine individual scatter images into a full field map
-        conti = len([archivo for archivo in os.listdir(direct_copy_model) if re.search(name_2+f'-{filter}-scatter'+'.*\.fits', archivo)])
-        os.system("astarithmetic "+str(direct_copy_model)+"/"+"*\.fits "+str(conti)+" sum -g1 --output="+str(ruta_full_scatter))  
 
         # Convert scatter map to DataFrame, mask NaNs using the original galaxy,
         # and save both raw and surface-brightness calibrated versions
@@ -251,6 +272,7 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
         output_df_sb = -2.5*np.log10(output_df)+zp+2.5*np.log10(px_scale**2)
         ut.dataframe_to_fits(output_df_sb, ruta_full_scatter_sb)  
 
+        
     elif not model_scatter_light:
         # Same loop as above but subtract only the PSF (no scatter-field modeling)
         os.system(f"asttable {path_stars} -cra,dec,rmin_norm,rmax_norm,image_index --sort phot_g_mean_mag \
@@ -287,7 +309,7 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
 
 
 class SubtractingStars:
-    def __init__(self, filter_list,dir, dir_psf, hdu, psf_hdu, mag_inf_lim, mag_sup_lim, min_dist,model_scatter, px_scale=0.33, crop_size_pix=(100,100), zp=22.5, noisechisel_params=None, segment_params=None):
+    def __init__(self, filter_list,dir, dir_psf, hdu, psf_hdu, mag_inf_lim, mag_sup_lim, min_dist,model_scatter, save_individual_scatter_maps, px_scale=0.33, crop_size_pix=(100,100), zp=22.5, noisechisel_params=None, segment_params=None):
         self.filter_list = filter_list
         self.dir = dir
         self.dir_psf = dir_psf
@@ -296,6 +318,7 @@ class SubtractingStars:
         self.mag_inf_lim = mag_inf_lim
         self.mag_sup_lim = mag_sup_lim
         self.model_scatter = model_scatter
+        self.save_individual_scatter_maps = save_individual_scatter_maps
         self.min_dist = min_dist
         self.px_scale = px_scale
         self.zp = zp
@@ -321,7 +344,7 @@ class SubtractingStars:
             fits_files = np.sort(fits_files)
             for name in fits_files:
                 try:    
-                    subtractor(filter, name, self.dir, self.dir_psf, self.hdu, self.psf_hdu, self.model_scatter, self.px_scale, self.zp)
+                    subtractor(filter, name, self.dir, self.dir_psf, self.hdu, self.psf_hdu, self.model_scatter, self.save_individual_scatter_maps, self.px_scale, self.zp)
                 except Exception as e:
                     print("\n ############################################")
                     print(f"\n Failure in galaxy {name} {filter}: {e}")

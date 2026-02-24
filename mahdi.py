@@ -62,6 +62,11 @@ def parse_args():
         help="Enable scattered light field modeling. Default: False.",
     )
     parser.add_argument(
+        "--save-individual-scatter-maps",
+        action="store_true",
+        help="Save the scatter light maps of all the individual stars. Default: False.",
+    )
+    parser.add_argument(
         "--px-scale",
         type=float,
         default=0.33,
@@ -127,6 +132,7 @@ def main():
         mag_sup_lim=args.mag_sup_sub,
         min_dist=args.min_dist_sub,
         model_scatter=args.model_scatter,
+        save_individual_scatter_maps=args.save_individual_scatter_maps,
         px_scale=args.px_scale,
         crop_size_pix=args.crop_size_pix,
         zp=args.zp,
@@ -145,6 +151,7 @@ def main():
         mag_sup_lim=args.mag_sup_sub,
         min_dist=args.min_dist_sub,
         model_scatter=args.model_scatter,
+        save_individual_scatter_maps=args.save_individual_scatter_maps,
         px_scale=args.px_scale,
         crop_size_pix=args.crop_size_pix,
         zp=args.zp,
