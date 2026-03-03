@@ -13,7 +13,7 @@ import utils as ut
 from astropy.io import fits
 
 
-def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, mag_sup_lim: float, min_dist: float, px_scale: float, crop_size_pix, noisechisel_params, segment_params) -> None:
+def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, mag_sup_lim: float, min_dist: float, px_scale: float, crop_size_pix, noisechisel_params, segment_params, dir_psf) -> None:
     """
     High-level pipeline for selecting stars around a galaxy, building radial profiles,
     fitting normalization rings, and producing a final revised FITS catalog.
@@ -34,7 +34,10 @@ def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, 
         Minimum angular separation (in degrees) between stars.
     px_scale : float
         Pixel scale (arcsec/pixel), used for radius conversion and surface brightness.
-
+    dir_psf : str
+        Directory containing the PSF models, expected to have files named like:
+        `psf_(gal_name)_(filter).fits`
+        `psf_profile_(gal_name)_(filter).fits`
     Returns
     -------
     None
@@ -90,7 +93,7 @@ def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, 
     
     # Step 5: Fit magnitude–radius relation with RANSAC, compute ring sizes
     r_min_ring, r_max_ring, x_positions, y_positions, magnitudes = ut.fit_ransac_and_build_rings(
-        mags_stars, flat_points, px_scale, str(ruta_gal), ra_stars, dec_stars, hdu
+        mags_stars, flat_points, px_scale, str(ruta_gal), ra_stars, dec_stars, hdu, name, filter, dir_psf
     )
     
     # Step 6: Finalize star catalog, move discarded sources, write revised FITS
@@ -331,7 +334,7 @@ class SubtractingStars:
             fits_files = np.sort(fits_files)
             for name in fits_files:
                 try:
-                    select_stars(filter, name, self.dir, self.hdu, self.mag_inf_lim, self.mag_sup_lim, self.min_dist, self.px_scale, self.crop_size_pix, self.noisechisel_params, self.segment_params)
+                    select_stars(filter, name, self.dir, self.hdu, self.mag_inf_lim, self.mag_sup_lim, self.min_dist, self.px_scale, self.crop_size_pix, self.noisechisel_params, self.segment_params,self.dir_psf)
                 except Exception as e:
                     print("\n ############################################")
                     print(f"\n Failure in galaxy {name} {filter}: {e}")

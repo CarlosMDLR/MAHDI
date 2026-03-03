@@ -137,9 +137,8 @@ def main():
         crop_size_pix=args.crop_size_pix,
         zp=args.zp,
         noisechisel_params=args.noisechisel_params,
-        segment_params=args.segment_params,
+        segment_params=args.segment_params
     ).selector()
-
     # 3) Run star subtraction
     SubtractingStars(
         filter_list=args.filters.split(","),

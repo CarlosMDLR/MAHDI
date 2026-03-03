@@ -17,10 +17,12 @@ from pathlib import Path
 from scipy import stats
 from scipy.optimize import curve_fit
 from astropy.table import Table
+from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import interp1d
 
 # Visualization
 import matplotlib.pyplot as plt
-
+import matplotlib as mpl
 # Astronomy
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -29,7 +31,7 @@ from astropy.wcs import WCS
 import astropy.visualization as vis
 from scipy.interpolate import RegularGridInterpolator
 import astropy.units as u
-
+from astropy.table import Table
 # Machine learning
 from sklearn.linear_model import LinearRegression, RANSACRegressor
 
@@ -503,6 +505,8 @@ def process_selected_stars(
             # Clean temporary/failed products like the original code
             try:
                 os.remove(str(path).replace(".fits", "_astarithmetic.fits"))
+                os.remove(str(path).replace(".fits", "_noisechisel.fits"))
+                os.remove(str(path).replace(".fits", "_segment.fits"))
             except Exception:
                 pass
             try:
@@ -651,6 +655,140 @@ def loadTableForGettingMaskRadius(filename):
 
     grid = np.loadtxt(filename)
     return grid, mag_grid, sb_grid
+###Functions for getting magRadioRelation
+def get_psfprofile_filename(dir_psf, name, filter):
+    name_2 = name.split("_")[0]
+    path_to_psfProfile = Path(dir_psf) / f"psf_profile_{name_2}_{filter}.fits"
+    return path_to_psfProfile
+
+def readProfile(model):
+    radius = []
+    profile = []
+    with open(model) as f:
+        for line in f:
+            splittedLine = line.split()
+            if (not np.isnan(float(splittedLine[1]))):
+                radius.append(float(splittedLine[0]))
+                profile.append(float(splittedLine[1]))
+    return(np.array(radius), np.array(profile))
+
+def readProfileFits(filename):
+    data = Table.read(filename)
+    return data['RADIUS'], data['MEAN']
+
+def truncateProfile(radius,profile,truncatePx):
+    index = -1
+    for i, value in enumerate(radius):
+        if (value > truncatePx):
+            index = i
+            break
+    return(radius[:index], profile[:index])
+
+def integrateProfile2D(R_psf,I_psf,integrationLimit=None):
+    R_psf = np.asarray(R_psf)
+    I_psf = np.asarray(I_psf)
+
+    #Remove NaN/Inf
+    mask = np.isfinite(R_psf) & np.isfinite(I_psf)
+    R_psf = R_psf[mask]
+    I_psf = I_psf[mask]
+
+    #Sort by radius
+    idx = np.argsort(R_psf)
+    R_psf = R_psf[idx]
+    I_psf = I_psf[idx]
+
+    #Apply integration limit
+    if integrationLimit is not None:
+        mask = R_psf <= integrationLimit
+        R_psf = R_psf[mask]
+        I_psf = I_psf[mask]
+    
+    integrand = I_psf * R_psf
+    I_tot = 2*np.pi*cumulative_trapezoid(integrand, R_psf, initial=0)
+
+    return I_tot[-1]
+
+# NOTE
+# 1.- We precompute the inverse PSF profile r(I) to efficiently get the radius at some I. Typical approach
+# would be having I(r) and looking for the r that I(r) - X ~=, doing it directly. Inverting is faster.
+
+# Since stellar magnitude only linearly scales the PSF flux, instead of scaling the
+# PSF for each star we equivalently scale the surface brightness threshold. This lets
+# us solve I_PSF(r) = I_threshold / s(m) using the original PSF shape, avoiding repeated
+# PSF scaling and interpolation. The result is a fast lookup of radius as a function
+# of magnitude and SB threshold.
+
+
+def build_inverse_psf(radius, profile):
+    mask = profile > 0
+    r = radius[mask]
+    I = profile[mask]
+
+    # Interpolate radius as function of intensity. It is reversed because interp1d 
+    # expects the 'x' dimension to always increase
+    return interp1d(I[::-1], r[::-1], bounds_error=False, fill_value=np.nan)
+
+def build_radius_table(radius, profile, mag_grid, sb_grid, zp, pixelScale):
+    inv_psf = build_inverse_psf(radius, profile) # We invert the psf once. We get r(I)
+    flux_model = integrateProfile2D(radius, profile)
+
+    table = np.zeros((len(mag_grid), len(sb_grid)))
+
+    for i, m in enumerate(mag_grid):
+        s = magnitudeToScaleFactor(m, flux_model, zp) # We get the scale factor for the desired magnitude
+
+        for j, sb in enumerate(sb_grid):
+            thresholdCounts = sb_to_counts(sb, zp, pixelScale)
+            table[i, j] = inv_psf(thresholdCounts / s) # We escale the threshold (instead of scaling the psf) and get the corresponding r
+    return table
+
+def magnitudeToScaleFactor(mag, modelFlux, zp=22.5):
+    targetFlux = 10**(-0.4 * (mag - zp))
+    return targetFlux / modelFlux
+
+def sb_to_counts(sb, zp, pixelScale):
+    return 10**(-0.4 * (sb - zp)) * (pixelScale**2)
+
+def save_radius_table(filename, grid, mag_grid, sb_grid):
+    with open(filename, "w") as f:
+
+        f.write("# mag_grid\n")
+        f.write("# " + " ".join(map(str, mag_grid)) + "\n")
+
+        f.write("# sb_grid\n")
+        f.write("# " + " ".join(map(str, sb_grid)) + "\n")
+
+        np.savetxt(f, grid)
+
+def generateSbMagTable(
+    dir_psf: str,
+    name: str,
+    filter: str,
+    output_filename: str,
+    px_scale: float,
+    zp: float,
+):
+    """
+    Generate a table of surface brightness vs. radius for a given PSF model.
+    The table is saved to `output_filename`.
+    
+    For masking the stars in our images, we need a radius for each star. This radius has to be related
+    to the magnitude of the star.
+    This relation is obtained via the PSF. We take the psf, we scale it to the magnitude of the star and
+    we define a surface brightness up to which we mask the stars.
+    This function receibes a PSF Model and explores a set of magnitudes for getting a relation (thus not having
+    to escalate and integrate the model when masking each of the stars).
+    """
+    cutProfile_px = 3000 #Hardcoded
+    psf_filename = get_psfprofile_filename(dir_psf, name, filter)
+    radius,profile = readProfileFits(psf_filename)
+    radius, profile = truncateProfile(radius, profile, cutProfile_px)
+    originalModelFlux = integrateProfile2D(radius, profile)
+    mag_grid = np.linspace(5,18,200)
+    sb_grid = np.linspace(20,26,200)
+    grid = build_radius_table(radius, profile, mag_grid, sb_grid, zp, px_scale)
+    save_radius_table(output_filename, grid, mag_grid, sb_grid)
 
 def fit_ransac_and_build_rings(
     mags_stars: np.ndarray,
@@ -660,6 +798,9 @@ def fit_ransac_and_build_rings(
     ra_stars: np.ndarray,
     dec_stars: np.ndarray,
     hdu_ind: int,
+    name: str,
+    filter: str,
+    dir_psf: str,
 ):
     """
     Fit RANSAC regression on (mag, log10(flat_points * px_scale)),
@@ -702,7 +843,8 @@ def fit_ransac_and_build_rings(
     # r_max_ring = 4.0 * r_sat_sat / px_scale
 
     # Define and read the table with the relation between surface brightness and radius for the used psf
-    magnitudeSbRadiusTableFile="/home/sguerra/astro/dwarfAnalysis/src/maskingImages/maskStarsUsingGaia/magnitudeSbRadiusToMask_fornax.dat"
+    magnitudeSbRadiusTableFile=f"./Process_data/Mask_data/magnitude_sb_radius_table_{name.split('_')[0]}_{filter}.dat"
+    generateSbMagTable(dir_psf, name, filter, magnitudeSbRadiusTableFile, px_scale, zp=22.5)
     grid, mag_grid, sb_grid = loadTableForGettingMaskRadius(magnitudeSbRadiusTableFile)
     calculateMaskRadius = RegularGridInterpolator((mag_grid, sb_grid), grid, bounds_error=False, fill_value=np.nan)
 
@@ -912,3 +1054,4 @@ def setup_subtractor_paths(
         path_complete,
         path_temp,
     )
+
