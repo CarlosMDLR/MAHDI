@@ -187,5 +187,5 @@ This code will be released under the MIT license.
 
 ## 🤝 Acknowledgements
 
-MAHDI is developed as part of a deep imaging pipeline at the Instituto de Astrofísica de Canarias (IAC). The tool relies on Gaia DR3 data and is designed to work in tandem with the PSF modeling code [LISAN]([https://github.com/](https://github.com/CarlosMDLR/LISAN))). If you use MAHDI in your research, please cite the accompanying paper Marrero-de la Rosa et al. 2026 (DOI: https://doi.org/10.1051/0004-6361/202557193) and Marrero-de la Rosa et al. (in Prep.) and acknowledge this repository.
+MAHDI is developed as part of a deep imaging pipeline at the Instituto de Astrofísica de Canarias (IAC). The tool relies on Gaia DR3 data and is designed to work in tandem with the PSF modeling code [LISAN]([https://github.com/](https://github.com/CarlosMDLR/LISAN))). If you use MAHDI in your research, please cite the accompanying paper Marrero-de la Rosa et al. 2026a (DOI: https://doi.org/10.1051/0004-6361/202557193) and Marrero-de la Rosa et al. 2026b (DOI: 10.48550/arXiv.2607.15340) and acknowledge this repository.
 
