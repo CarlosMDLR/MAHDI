@@ -1,0 +1,5 @@
+# Gaia DR3 source_id values for stars that must not be subtracted.
+# IDs may be separated by new lines, spaces, commas or semicolons.
+1157187751457501824
+1156992450704815744
+1156992897381421056
