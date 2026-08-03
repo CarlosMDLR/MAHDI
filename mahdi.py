@@ -73,16 +73,48 @@ def parse_args():
         help="Pixel scale (arcsec/pixel). Default: 0.33.",
     )
     parser.add_argument(
-        "--crop-size-pix", 
-        type=Tuple[int,int], 
-        default=(500,500), 
-        help="Crop size around stars (pixels). Default: 500."
-        )
+        "--crop-size-pix",
+        type=int,
+        nargs=2,
+        metavar=("HEIGHT", "WIDTH"),
+        default=(500, 500),
+        help="Crop size around stars in pixels as HEIGHT WIDTH. Default: 500 500.",
+    )
     parser.add_argument(
         "--zp",
         type=float,
         default=22.5,
         help="Photometric zero point. Default: 22.5.",
+    )
+    parser.add_argument(
+        "--gaia-ids-not-subtract",
+        type=str,
+        default=None,
+        help=(
+            "Optional TXT file containing Gaia DR3 source_id values for stars "
+            "that must not be subtracted."
+        ),
+    )
+    parser.add_argument(
+        "--gaia-match-radius-arcsec",
+        type=float,
+        default=1.0,
+        help="Maximum angular separation for the Gaia DR3 crossmatch. Default: 1.0 arcsec.",
+    )
+    parser.add_argument(
+        "--gaia-match-max-mag-diff",
+        type=float,
+        default=0.1,
+        help=(
+            "Maximum absolute difference between the selected Gaia G magnitude "
+            "and the matched Gaia DR3 magnitude. Default: 0.1 mag."
+        ),
+    )
+    parser.add_argument(
+        "--gaia-cache-dir",
+        type=str,
+        default="./Process_data/Gaia_catalogs",
+        help="Directory used to cache Gaia DR3 crossmatch results.",
     )
     parser.add_argument(
         "--noisechisel-params-full-image",
@@ -134,11 +166,16 @@ def main():
         model_scatter=args.model_scatter,
         save_individual_scatter_maps=args.save_individual_scatter_maps,
         px_scale=args.px_scale,
-        crop_size_pix=args.crop_size_pix,
+        crop_size_pix=tuple(args.crop_size_pix),
         zp=args.zp,
         noisechisel_params=args.noisechisel_params,
-        segment_params=args.segment_params
+        segment_params=args.segment_params,
+        gaia_ids_not_subtract=args.gaia_ids_not_subtract,
+        gaia_match_radius_arcsec=args.gaia_match_radius_arcsec,
+        gaia_match_max_mag_diff=args.gaia_match_max_mag_diff,
+        gaia_cache_dir=args.gaia_cache_dir,
     ).selector()
+    breakpoint()
     # 3) Run star subtraction
     SubtractingStars(
         filter_list=args.filters.split(","),
@@ -152,10 +189,14 @@ def main():
         model_scatter=args.model_scatter,
         save_individual_scatter_maps=args.save_individual_scatter_maps,
         px_scale=args.px_scale,
-        crop_size_pix=args.crop_size_pix,
+        crop_size_pix=tuple(args.crop_size_pix),
         zp=args.zp,
         noisechisel_params=args.noisechisel_params,
         segment_params=args.segment_params,
+        gaia_ids_not_subtract=args.gaia_ids_not_subtract,
+        gaia_match_radius_arcsec=args.gaia_match_radius_arcsec,
+        gaia_match_max_mag_diff=args.gaia_match_max_mag_diff,
+        gaia_cache_dir=args.gaia_cache_dir,
     ).subtractor()
 
 

@@ -13,7 +13,7 @@ import utils as ut
 from astropy.io import fits
 
 
-def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, mag_sup_lim: float, min_dist: float, px_scale: float, crop_size_pix, noisechisel_params, segment_params, dir_psf) -> None:
+def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, mag_sup_lim: float, min_dist: float, px_scale: float, crop_size_pix, noisechisel_params, segment_params, dir_psf, gaia_ids_not_subtract=None, gaia_match_radius_arcsec=1.0, gaia_match_max_mag_diff=0.1, gaia_cache_dir='./Process_data/Gaia_catalogs') -> None:
     """
     High-level pipeline for selecting stars around a galaxy, building radial profiles,
     fitting normalization rings, and producing a final revised FITS catalog.
@@ -59,11 +59,15 @@ def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, 
     
     # Step 1: Prepare star-selection environment (directories, output paths)
     ruta_star, ruta_out_norm, ruta_gal, norm_dir, name_2, close_sources_dir = ut.prepare_star_selection(
-        filter, name, dir, hdu, mag_inf_lim, mag_sup_lim, min_dist
+        filter, name, dir, hdu, mag_inf_lim, mag_sup_lim, min_dist,
+        gaia_ids_not_subtract=gaia_ids_not_subtract,
+        gaia_match_radius_arcsec=gaia_match_radius_arcsec,
+        gaia_match_max_mag_diff=gaia_match_max_mag_diff,
+        gaia_cache_dir=gaia_cache_dir,
     )
     
     # Step 2: Process stars → crop stamps, build masks, measure radial profiles
-    radius, counts, ra_stars, dec_stars, mags_stars, _ = ut.process_selected_stars(
+    radius, counts, ra_stars, dec_stars, mags_stars, source_ids, gaia_match_separations, _ = ut.process_selected_stars(
         ruta_star=ruta_star,
         ruta_gal=ruta_gal,
         hdu=hdu,
@@ -82,12 +86,14 @@ def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, 
     flat_points = ut.find_flat_points(radius, counts)
     
     # Step 4: Filter stars (keep consistent indices) and clip flat radii
-    mags_stars, ra_stars, dec_stars, flat_points, preserve_index = ut.filter_and_clip_stars(
+    mags_stars, ra_stars, dec_stars, source_ids, gaia_match_separations, flat_points, preserve_index = ut.filter_and_clip_stars(
         norm_dir=norm_dir,
         filter=filter,
         mags_stars=mags_stars,
         ra_stars=ra_stars,
         dec_stars=dec_stars,
+        source_ids=source_ids,
+        gaia_match_separations=gaia_match_separations,
         flat_points=flat_points,
     )
     
@@ -111,6 +117,8 @@ def select_stars(filter: str, name: str, dir: str, hdu:int, mag_inf_lim: float, 
         ra_stars=ra_stars,
         dec_stars=dec_stars,
         mags_stars=mags_stars,
+        source_ids=source_ids,
+        gaia_match_separations=gaia_match_separations,
     )
     return
 
@@ -312,7 +320,7 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
 
 
 class SubtractingStars:
-    def __init__(self, filter_list,dir, dir_psf, hdu, psf_hdu, mag_inf_lim, mag_sup_lim, min_dist,model_scatter, save_individual_scatter_maps, px_scale=0.33, crop_size_pix=(100,100), zp=22.5, noisechisel_params=None, segment_params=None):
+    def __init__(self, filter_list, dir, dir_psf, hdu, psf_hdu, mag_inf_lim, mag_sup_lim, min_dist, model_scatter, save_individual_scatter_maps, px_scale=0.33, crop_size_pix=(100,100), zp=22.5, noisechisel_params=None, segment_params=None, gaia_ids_not_subtract=None, gaia_match_radius_arcsec=1.0, gaia_match_max_mag_diff=0.1, gaia_cache_dir='./Process_data/Gaia_catalogs'):
         self.filter_list = filter_list
         self.dir = dir
         self.dir_psf = dir_psf
@@ -328,13 +336,26 @@ class SubtractingStars:
         self.crop_size_pix=crop_size_pix
         self.noisechisel_params = noisechisel_params 
         self.segment_params = segment_params
+        self.gaia_ids_not_subtract = gaia_ids_not_subtract
+        self.gaia_match_radius_arcsec = gaia_match_radius_arcsec
+        self.gaia_match_max_mag_diff = gaia_match_max_mag_diff
+        self.gaia_cache_dir = gaia_cache_dir
     def selector(self):
         for filter in self.filter_list:    
-            fits_files=[file for file in os.listdir(self.dir) if re.search(filter+'.*\.fits', file)]
+            fits_files=[file for file in os.listdir(self.dir) if re.search(rf'{re.escape(filter)}.*\.fits$', file)]
             fits_files = np.sort(fits_files)
             for name in fits_files:
                 try:
-                    select_stars(filter, name, self.dir, self.hdu, self.mag_inf_lim, self.mag_sup_lim, self.min_dist, self.px_scale, self.crop_size_pix, self.noisechisel_params, self.segment_params,self.dir_psf)
+                    select_stars(
+                        filter, name, self.dir, self.hdu, self.mag_inf_lim,
+                        self.mag_sup_lim, self.min_dist, self.px_scale,
+                        self.crop_size_pix, self.noisechisel_params,
+                        self.segment_params, self.dir_psf,
+                        gaia_ids_not_subtract=self.gaia_ids_not_subtract,
+                        gaia_match_radius_arcsec=self.gaia_match_radius_arcsec,
+                        gaia_match_max_mag_diff=self.gaia_match_max_mag_diff,
+                        gaia_cache_dir=self.gaia_cache_dir,
+                    )
                 except Exception as e:
                     print("\n ############################################")
                     print(f"\n Failure in galaxy {name} {filter}: {e}")
@@ -343,7 +364,7 @@ class SubtractingStars:
     def subtractor(self):
 
         for filter in self.filter_list:    
-            fits_files=[file for file in os.listdir(self.dir) if re.search(filter+'.*\.fits', file)]
+            fits_files=[file for file in os.listdir(self.dir) if re.search(rf'{re.escape(filter)}.*\.fits$', file)]
             fits_files = np.sort(fits_files)
             for name in fits_files:
                 try:    

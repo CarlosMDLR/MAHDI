@@ -5,6 +5,7 @@
 # Standard library
 import argparse
 import glob
+import hashlib
 import os
 import re
 import shutil
@@ -37,7 +38,7 @@ from sklearn.linear_model import LinearRegression, RANSACRegressor
 
 # Utilities
 from tqdm import tqdm
-from typing import List, Tuple, Sequence
+from typing import List, Optional, Set, Tuple, Sequence, Union
 
 # Deactivate warnings
 import warnings
@@ -302,8 +303,265 @@ def masks_maker(name, profile, noisechisel_params=None, segment_params=None):
     return objects
  
 
-def prepare_star_selection(filter: str, name: str, dir: str, hdu: int,
-                           mag_inf_lim: float, mag_sup_lim: float, min_dist: float):
+
+
+def _get_table_column_name(table: Table, requested_name: str) -> str:
+    """Return the actual table column name using a case-insensitive lookup."""
+    mapping = {name.lower(): name for name in table.colnames}
+    try:
+        return mapping[requested_name.lower()]
+    except KeyError as exc:
+        raise KeyError(
+            f"Required column '{requested_name}' was not found. "
+            f"Available columns: {table.colnames}"
+        ) from exc
+
+
+def load_gaia_ids_not_subtract(filename: Optional[str]) -> Set[int]:
+    """
+    Read Gaia DR3 source IDs that must be protected from subtraction.
+
+    The file may contain one or several IDs per line, separated by whitespace,
+    commas or semicolons. Text following ``#`` is treated as a comment.
+    """
+    if filename is None:
+        return set()
+
+    path = Path(filename).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"Gaia exclusion file not found: {path}")
+
+    protected_ids: Set[int] = set()
+    for line_number, raw_line in enumerate(path.read_text().splitlines(), start=1):
+        content = raw_line.split("#", 1)[0].strip()
+        if not content:
+            continue
+
+        for token in re.split(r"[\s,;]+", content):
+            if not token:
+                continue
+            try:
+                protected_ids.add(int(token))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid Gaia source_id '{token}' in {path}, line {line_number}."
+                ) from exc
+
+    return protected_ids
+
+
+def _selected_stars_hash(ra: np.ndarray, dec: np.ndarray, magnitude: np.ndarray) -> str:
+    """Build a reproducible hash identifying a selected-star catalog."""
+    values = np.column_stack(
+        (
+            np.asarray(ra, dtype=np.float64),
+            np.asarray(dec, dtype=np.float64),
+            np.asarray(magnitude, dtype=np.float64),
+        )
+    )
+    return hashlib.sha256(values.tobytes()).hexdigest()
+
+
+def add_gaia_ids_and_filter_protected_stars(
+    ruta_star: Union[str, Path],
+    name_2: str,
+    filter: str,
+    gaia_ids_not_subtract: Optional[str] = None,
+    gaia_match_radius_arcsec: float = 1.0,
+    gaia_match_max_mag_diff: float = 0.1,
+    gaia_cache_dir: Union[str, Path] = "./Process_data/Gaia_catalogs",
+) -> None:
+    """
+    Crossmatch the selected-star FITS table with Gaia DR3 and protect requested IDs.
+
+    A compact table containing the selected coordinates is uploaded to Gaia TAP+.
+    Gaia candidates inside ``gaia_match_radius_arcsec`` are returned, and the best
+    candidate for every selected star is chosen locally using angular separation
+    and compatibility in Gaia G magnitude. The resulting ``source_id`` and
+    ``gaia_match_separation_arcsec`` columns are written into ``ruta_star``.
+
+    Stars whose ``source_id`` occurs in ``gaia_ids_not_subtract`` are removed from
+    the selection table before stamps, radial profiles or PSF subtraction are made.
+    """
+    if gaia_match_radius_arcsec <= 0:
+        raise ValueError("gaia_match_radius_arcsec must be greater than zero.")
+    if gaia_match_max_mag_diff < 0:
+        raise ValueError("gaia_match_max_mag_diff cannot be negative.")
+
+    ruta_star = Path(ruta_star)
+    selected = Table.read(ruta_star, hdu=1)
+
+    ra_name = _get_table_column_name(selected, "ra")
+    dec_name = _get_table_column_name(selected, "dec")
+    mag_name = _get_table_column_name(selected, "phot_g_mean_mag")
+
+    ra = np.asarray(selected[ra_name], dtype=float)
+    dec = np.asarray(selected[dec_name], dtype=float)
+    selected_mag = np.asarray(selected[mag_name], dtype=float)
+    n_selected = len(selected)
+
+    if n_selected == 0:
+        selected["source_id"] = np.array([], dtype=np.int64)
+        selected["gaia_match_separation_arcsec"] = np.array([], dtype=np.float64)
+        selected.write(ruta_star, overwrite=True)
+        print(f"Gaia crossmatch for {name_2}_{filter}: no selected stars.")
+        return
+
+    upload_table = Table()
+    upload_table["selected_index"] = np.arange(n_selected, dtype=np.int64)
+    upload_table["selected_ra"] = ra
+    upload_table["selected_dec"] = dec
+    upload_table["selected_mag"] = selected_mag
+
+    catalog_hash = _selected_stars_hash(ra, dec, selected_mag)
+    cache_dir = Path(gaia_cache_dir).expanduser()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{name_2}_{filter}_gaia_dr3_candidates.fits"
+
+    candidates = None
+    if cache_path.is_file():
+        try:
+            cached = Table.read(cache_path)
+            cached_hash = cached.meta.get("SELHASH")
+            cached_radius = float(cached.meta.get("RADASEC", np.nan))
+            if cached_hash == catalog_hash and np.isclose(
+                cached_radius, gaia_match_radius_arcsec
+            ):
+                candidates = cached
+                print(f"Using cached Gaia DR3 candidates: {cache_path}")
+        except Exception as exc:
+            print(f"Ignoring invalid Gaia cache {cache_path}: {exc}")
+
+    if candidates is None:
+        try:
+            from astroquery.gaia import Gaia
+        except ImportError as exc:
+            raise ImportError(
+                "The Gaia crossmatch requires astroquery. Install it with "
+                "'python -m pip install astroquery'."
+            ) from exc
+
+        radius_deg = gaia_match_radius_arcsec / 3600.0
+        query = f"""
+            SELECT
+                u.selected_index,
+                u.selected_ra,
+                u.selected_dec,
+                u.selected_mag,
+                g.source_id,
+                g.ra AS gaia_ra,
+                g.dec AS gaia_dec,
+                g.phot_g_mean_mag AS gaia_phot_g_mean_mag,
+                DISTANCE(
+                    POINT('ICRS', u.selected_ra, u.selected_dec),
+                    POINT('ICRS', g.ra, g.dec)
+                ) * 3600.0 AS separation_arcsec
+            FROM TAP_UPLOAD.selected_stars AS u
+            JOIN gaiadr3.gaia_source AS g
+            ON 1 = CONTAINS(
+                POINT('ICRS', g.ra, g.dec),
+                CIRCLE('ICRS', u.selected_ra, u.selected_dec, {radius_deg:.15f})
+            )
+        """
+
+        print(
+            f"Querying Gaia DR3 for {n_selected} selected stars "
+            f"({name_2}_{filter})..."
+        )
+        job = Gaia.launch_job_async(
+            query=query,
+            upload_resource=upload_table,
+            upload_table_name="selected_stars",
+            verbose=False,
+        )
+        candidates = job.get_results()
+        candidates.meta["SELHASH"] = catalog_hash
+        candidates.meta["RADASEC"] = float(gaia_match_radius_arcsec)
+        candidates.write(cache_path, overwrite=True)
+
+    source_ids = np.full(n_selected, -1, dtype=np.int64)
+    match_separations = np.full(n_selected, np.nan, dtype=np.float64)
+
+    if len(candidates) > 0:
+        candidate_index_name = _get_table_column_name(candidates, "selected_index")
+        candidate_source_name = _get_table_column_name(candidates, "source_id")
+        candidate_mag_name = _get_table_column_name(candidates, "gaia_phot_g_mean_mag")
+        candidate_sep_name = _get_table_column_name(candidates, "separation_arcsec")
+
+        candidate_indices = np.asarray(candidates[candidate_index_name], dtype=int)
+        candidate_sources = np.asarray(candidates[candidate_source_name], dtype=np.int64)
+        candidate_mags = np.asarray(candidates[candidate_mag_name], dtype=float)
+        candidate_seps = np.asarray(candidates[candidate_sep_name], dtype=float)
+
+        for selected_index in range(n_selected):
+            rows = np.flatnonzero(candidate_indices == selected_index)
+            if rows.size == 0:
+                continue
+
+            magnitude_differences = np.abs(
+                candidate_mags[rows] - selected_mag[selected_index]
+            )
+            valid = np.isfinite(candidate_seps[rows]) & (
+                candidate_seps[rows] <= gaia_match_radius_arcsec
+            )
+
+            if np.isfinite(selected_mag[selected_index]):
+                valid &= np.isfinite(magnitude_differences)
+                valid &= magnitude_differences <= gaia_match_max_mag_diff
+
+            valid_rows = rows[valid]
+            if valid_rows.size == 0:
+                continue
+
+            valid_mag_diff = np.abs(
+                candidate_mags[valid_rows] - selected_mag[selected_index]
+            )
+            valid_mag_diff[~np.isfinite(valid_mag_diff)] = np.inf
+            order = np.lexsort((valid_mag_diff, candidate_seps[valid_rows]))
+            best_row = valid_rows[order[0]]
+
+            source_ids[selected_index] = candidate_sources[best_row]
+            match_separations[selected_index] = candidate_seps[best_row]
+
+    if "source_id" in selected.colnames:
+        selected.remove_column("source_id")
+    if "gaia_match_separation_arcsec" in selected.colnames:
+        selected.remove_column("gaia_match_separation_arcsec")
+    selected["source_id"] = source_ids
+    selected["gaia_match_separation_arcsec"] = match_separations
+
+    protected_ids = load_gaia_ids_not_subtract(gaia_ids_not_subtract)
+    protected_mask = np.isin(source_ids, np.fromiter(protected_ids, dtype=np.int64)) \
+        if protected_ids else np.zeros(n_selected, dtype=bool)
+
+    n_matched = int(np.count_nonzero(source_ids >= 0))
+    n_unmatched = n_selected - n_matched
+    n_protected = int(np.count_nonzero(protected_mask))
+
+    selected = selected[~protected_mask]
+    selected.write(ruta_star, overwrite=True)
+
+    print(f"Gaia crossmatch for {name_2}_{filter}:")
+    print(f"  selected stars: {n_selected}")
+    print(f"  matched stars: {n_matched}")
+    print(f"  unmatched stars: {n_unmatched}")
+    print(f"  protected stars removed: {n_protected}")
+    print(f"  stars retained for subtraction: {len(selected)}")
+
+
+def prepare_star_selection(
+    filter: str,
+    name: str,
+    dir: str,
+    hdu: int,
+    mag_inf_lim: float,
+    mag_sup_lim: float,
+    min_dist: float,
+    gaia_ids_not_subtract: Optional[str] = None,
+    gaia_match_radius_arcsec: float = 1.0,
+    gaia_match_max_mag_diff: float = 0.1,
+    gaia_cache_dir: Union[str, Path] = "./Process_data/Gaia_catalogs",
+):
     """
     Prepare working directories, run `astscript-psf-select-stars` to select stars,
     and normalize the output structure for further processing.
@@ -367,6 +625,17 @@ def prepare_star_selection(filter: str, name: str, dir: str, hdu: int,
             f"--output={ruta_out_quit}",
         ],
         check=True,
+    )
+
+    # Enrich the selected catalog with Gaia DR3 source IDs and remove protected stars.
+    add_gaia_ids_and_filter_protected_stars(
+        ruta_star=ruta_out_quit,
+        name_2=name_2,
+        filter=filter,
+        gaia_ids_not_subtract=gaia_ids_not_subtract,
+        gaia_match_radius_arcsec=gaia_match_radius_arcsec,
+        gaia_match_max_mag_diff=gaia_match_max_mag_diff,
+        gaia_cache_dir=gaia_cache_dir,
     )
 
     # Root directory for normalized radii results
@@ -440,6 +709,10 @@ def process_selected_stars(
     ra_stars = np.asarray(table["ra"])
     dec_stars = np.asarray(table["dec"])
     mags_stars = np.asarray(table["phot_g_mean_mag"])
+    source_ids = np.asarray(table["source_id"], dtype=np.int64)
+    gaia_match_separations = np.asarray(
+        table["gaia_match_separation_arcsec"], dtype=float
+    )
 
     # Generate per-star crops with astcrop
     for idx, (ra, dec) in enumerate(zip(ra_stars, dec_stars), start=0):
@@ -518,7 +791,16 @@ def process_selected_stars(
             contador += 1
             continue
 
-    return np.array(radius), np.array(counts), ra_stars, dec_stars, mags_stars, quitar
+    return (
+        np.array(radius),
+        np.array(counts),
+        ra_stars,
+        dec_stars,
+        mags_stars,
+        source_ids,
+        gaia_match_separations,
+        quitar,
+    )
 
 def find_flat_points(radius: Sequence[Sequence[float]], counts: Sequence[Sequence[float]]) -> List[float]:
     """
@@ -574,6 +856,8 @@ def filter_and_clip_stars(
     mags_stars: np.ndarray,
     ra_stars: np.ndarray,
     dec_stars: np.ndarray,
+    source_ids: np.ndarray,
+    gaia_match_separations: np.ndarray,
     flat_points: List[float],
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -632,9 +916,19 @@ def filter_and_clip_stars(
     mags_stars = np.delete(mags_stars, quitar)
     ra_stars = np.delete(ra_stars, quitar)
     dec_stars = np.delete(dec_stars, quitar)
+    source_ids = np.delete(source_ids, quitar)
+    gaia_match_separations = np.delete(gaia_match_separations, quitar)
     flat_points = np.array(flat_points)
 
-    return mags_stars, ra_stars, dec_stars, flat_points, preserve_index
+    return (
+        mags_stars,
+        ra_stars,
+        dec_stars,
+        source_ids,
+        gaia_match_separations,
+        flat_points,
+        preserve_index,
+    )
 
 def loadTableForGettingMaskRadius(filename):
     mag_grid = None
@@ -887,7 +1181,9 @@ def finalize_sources_and_write_fits(
     ra_stars: np.ndarray,
     dec_stars: np.ndarray,
     mags_stars: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[int], np.ndarray]:
+    source_ids: np.ndarray,
+    gaia_match_separations: np.ndarray,
+) -> None:
     # Distancia euclidiana
     def euclidean_distance(x1, y1, x2, y2):
         return np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
@@ -947,17 +1243,24 @@ def finalize_sources_and_write_fits(
                 print(f"Preserved: {file_name}")
 
     # Escribir FITS revisado con tabla actualizada
-    hdul = fits.open(ruta_star)
+    with fits.open(ruta_star) as hdul:
+        primary_header = hdul[0].header.copy()
+        table_extname = hdul[1].header.get("EXTNAME")
+
     ra_final = ra_stars[indices_to_keep]
     dec_final = dec_stars[indices_to_keep]
     phot_g_final = mags_stars[indices_to_keep]
+    source_id_final = source_ids[indices_to_keep]
+    gaia_separation_final = gaia_match_separations[indices_to_keep]
 
     data_combined = np.zeros(
         len(indices_finales),
         dtype=[
-            ("ra", ">f4"),
-            ("dec", ">f4"),
+            ("ra", ">f8"),
+            ("dec", ">f8"),
             ("phot_g_mean_mag", ">f4"),
+            ("source_id", ">i8"),
+            ("gaia_match_separation_arcsec", ">f8"),
             ("rmin_norm", ">i4"),
             ("rmax_norm", ">i4"),
             ("image_index", ">i4"),
@@ -966,15 +1269,20 @@ def finalize_sources_and_write_fits(
     data_combined["ra"] = ra_final
     data_combined["dec"] = dec_final
     data_combined["phot_g_mean_mag"] = phot_g_final
+    data_combined["source_id"] = source_id_final
+    data_combined["gaia_match_separation_arcsec"] = gaia_separation_final
     data_combined["rmin_norm"] = np.round(r_min_ring).astype(int)
     data_combined["rmax_norm"] = (np.round(r_max_ring).astype(int) + 1)
     data_combined["image_index"] = indices_finales
 
-    hdul[1].header["NAXIS2"] = int(len(indices_finales))
+    table_hdu = fits.BinTableHDU(data_combined)
+    if table_extname:
+        table_hdu.name = table_extname
+
     new_hdul = fits.HDUList(
         [
-            fits.PrimaryHDU(header=hdul[0].header),
-            fits.BinTableHDU(data_combined, header=hdul[1].header),
+            fits.PrimaryHDU(header=primary_header),
+            table_hdu,
         ]
     )
     new_hdul.writeto(ruta_star.replace(".fits", "_revised.fits"), overwrite=True)
@@ -1054,4 +1362,3 @@ def setup_subtractor_paths(
         path_complete,
         path_temp,
     )
-
