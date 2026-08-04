@@ -175,7 +175,7 @@ def main():
         gaia_match_max_mag_diff=args.gaia_match_max_mag_diff,
         gaia_cache_dir=args.gaia_cache_dir,
     ).selector()
-    breakpoint()
+    
     # 3) Run star subtraction
     SubtractingStars(
         filter_list=args.filters.split(","),
