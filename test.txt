@@ -1,0 +1,37 @@
+No segmented image given to use '--minaxisratio'
+
+
+============================================================
+
+ Masking Coma_lum.fits
+
+============================================================
+Using cached Gaia DR3 candidates: Process_data/Gaia_catalogs/Coma_lum_gaia_dr3_candidates.fits
+Gaia crossmatch for Coma_lum:
+  selected stars: 2
+  matched stars: 2
+  unmatched stars: 0
+  protected stars removed: 0
+  stars retained for subtraction: 2
+
+
+============================================================
+
+ PREPARING STAR SELECTION OF Coma_lum.fits
+
+============================================================
+Subtracting star 1.955174210953283e+02 2.899150403939477e+01
+astscript-psf-subtract: option '--scale=' requires an argument. Try 'astscript-psf-subtract --help' for more information
+astscript-psf-subtract: option '--scale=' requires an argument. Try 'astscript-psf-subtract --help' for more information
+Subtracting star 1.967080167943335e+02 2.820661565426241e+01
+astscript-psf-subtract: option '--scale=' requires an argument. Try 'astscript-psf-subtract --help' for more information
+astscript-psf-subtract: option '--scale=' requires an argument. Try 'astscript-psf-subtract --help' for more information
+Preserved: Coma_lum_0.fits
+Preserved: Coma_lum_1.fits
+
+
+============================================================
+
+ Subtracting stars from Coma_lum.fits
+
+============================================================

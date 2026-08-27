@@ -212,7 +212,6 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
         df1 = pd.DataFrame(np.zeros(shape))
         ut.dataframe_to_fits(df1, ruta_full_scatter, hdu_index=1)
         os.system(f"cp {ruta_full_scatter} {ruta_full_scatterTmp}")
-
         # Loop over stars, compute PSF scale factor, subtract both model-only scatter image
         # and the full PSF from the galaxy image, accumulating results in a scatter map
         os.system(f"""
@@ -230,7 +229,6 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
                     --center=$ra,$dec \
                     --tmpdir=./Trash  \
                     --keeptmp  \
-                    --nocentering  \
                     --sigmaclip=2,0.2 \
                     --normradii=$normi \
                     --segment={path_complete});
@@ -270,6 +268,7 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
                 fi
             done""")
 
+        
         # Path for scatter map in Surface Brightness
         ruta_full_scatter_sb= f"{directorio_full_scatter}/{name_2}_{filter}_full_scatter_field_{filter}_sb.fits"
 
@@ -298,7 +297,6 @@ def subtractor( filter: str, name: str, dir: str, dir_psf:str, hdu:int, psf_hdu:
                     --center=$ra,$dec \
                     --tmpdir=./Trash \
                     --keeptmp \
-                    --nocentering \
                     --sigmaclip=2,0.2 \
                     --normradii=$normi \
                     --segment={path_complete});\
